@@ -1,0 +1,1 @@
+cmd_/usr/src/hw2-cse506g38/fs/trfs/trfs.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /usr/src/hw2-cse506g38/fs/trfs/trfs.ko /usr/src/hw2-cse506g38/fs/trfs/trfs.o /usr/src/hw2-cse506g38/fs/trfs/trfs.mod.o

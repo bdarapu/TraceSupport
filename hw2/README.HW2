@@ -1,0 +1,173 @@
+
+STACKABLE TRACING FILE SYSTEM (TRFS) TO CAPTURE RECORDS OF FILE SYSTEM ACTIVITY FOR A NUMBER OF FILE SYSTEM OPERATIONS.
+
+INTRODUCTION
+	Trfs file system is a stackable file system developed to capture records of file system activity for file system operations. 
+	For example, for the ->open method, it records the file name, open mode, permissions, and the return result (or errno).
+	For write method it traces the number of bytes to be written, content written and the return result.
+	All such traced  records are appended to a log file along with the record size, record type and record id.
+	
+FILES ADDED/ MODIFIED
+	- trfs/Makefile - code changed to build trfs.ko module 
+					  
+	- trfs/install_module.sh -  run this script to install trfs.ko module
+	
+	- HW2/trctl.c - added user file to list, to set the bitmap for which file system methods to trace.
+					   
+	- HW2/trctl.h - header file added for ioctl user program
+	
+	- trfs/main.c	 - modified code to add mount option for tfile and for setting the default values for variables saved in sb's private data
+
+ 	- trfs/super.c - modified code in trfs_put_super to free the fd and buffer stored in the sb's private data
+					   
+	- trfs/file.c	 - modified code to handle ioctls from user program and also added tracing support for file operations
+			  
+	- trfs/inode.c   - modified code to support tracing functionality for mkdir and rmdir
+
+	- README.HW2     - Contains overall description of trfs
+	
+	- HW2/Makefile  - Makefile for compiling trctl and treplay
+
+	- HW2/treplay.c - user program for replaying all the records from tfile with n/s options
+
+	- HW2/treplay.h - header file for user program
+
+	- HW2/testcases.c - file which has some file operations which we used for creating tfile and treplaying it
+
+
+	made small changes to these to make trfs loadable
+	- trfs/Kconfig
+	- fs/Kconfig
+	- fs/Makefile
+	- include/uapi/linux/magic.h 
+
+	
+HOW TO COMPILE AND RUN
+	- do make inside trfs folder 
+	- run script install_module.sh to install trfs.ko module
+	- run mount command as - 
+	    mount -t trfs -o tfile=/temp/tfile.txt /usr/src/hw2-cse506g38/hw2/test /usr/src/hw2-cse506g38/hw2/upper/
+	   (I have mounted trfs on top of /usr/src/hw2-cse506g38/hw2/test, mountpoint is
+            /usr/src/hw2-cse506g38/hw2/upper/, provide full path of tfile.txt file in tfile option, 
+            relative path will not work) 
+	- Now you can run ioctl user program to get and set the bitmaps for the functions to be used.
+	    To get the bitmap   - run -> ./trctl /mnt/trfs
+			To set the bitmap   - run -> ./trctl all/none/0x17 /mnt/trfs
+			
+	- Now go to mount point (/usr/src/hw2-cse506g38/hw2/upper/) and try to do some file operations like read, write and open files or creating/removing directories
+	  we used testcases.c for this purpose. once done, unmount the trfs file system.
+
+	- For umount, run -> umount /usr/src/hw2-cse506g38/hw2/upper/
+
+	- Now go to /usr/src/hw2-cse506g38/hw2/test2 which is a essentially a copy of the original test folder and then run -> .././treplay /temp/tfile.txt 
+	to replay all the records in the tfile and then run 'diff -ruN test test2' in HW2. you can use options -ns for ./treplay
+
+	
+
+Traced Functions:
+		trfs_open
+		trfs_read
+		trfs_write
+		trfs_file_release
+		trfs_mkdir
+		trfs_rmdir
+
+General Record Format for Traced Functions:
+		Record Size, Record Id, Record type, Length of the path/buffer, Path/Buffer, Flags/Mode/Open_record_id, return value of the function.
+		Size - total size of the record
+		Id - Unique number for each id
+		type - type of the record(eg. 'o' for trfs_open)
+		for read,write,mkdir,rmdir and open had to save length of the buffer/path and buffer/path in the record
+		recorded flags/mode for functions like open, mkdir
+		for read/write and close functions we need the fd which is the return value of the open system call. 
+		so to get the fd, during open function tracing corresponding record it was saved in file's private data and this open_record_id was logged in records of read/write/close functions to lookup the corresponding file descriptor.
+		Return value or errno: is the value returned by the trfs function.
+		
+TRACING OPERATION Recording
+	- For Every Function, Copied all information of the records into a buffer after calculating/getting all the details needed to perform 
+		the corresponding system call like pathname/buffer/modes ..etc. and then wrote the buffer to the tfile
+	- Used Mutex Lock for critical section which is adding record information to buffer from preventing multiple functions adding information to the buffer at the same time.
+
+
+USER PROGRAM AND IOCTL KERNEL CODE WORKING
+	- Ioctl implemeted to to set the bitmap of 
+					 which file system methods to trace.
+	-Six Methods can be traced.Hex values for the methods:
+		trfs_open 		- 0x01
+		trfs_read 		- 0x02
+		trfs_write 		- 0x04
+		trfs_file_release- 0x10
+		trfs_mkdir 		- 0x40
+		trfs_rmdir 		- 0x80
+		
+	- Put checks for missing arguments, invalid arguments or extra arguments
+	  passed from user program trctl.c
+	- Give mount point in command as /usr/src/hw2-cse506g38/hw2/upper, otherwise it will give error
+	-UserProgram (trctl.c) checks for invlaid arguments , can be run in two ways:
+		./trctl /usr/src/hw2-cse506g38/hw2/upper - will show the current bitmap set
+		
+		./trctl cmd /usr/src/hw2-cse506g38/hw2/upper - bitmap can be set with cmd 
+		values of cmd : "all"
+						"none"
+						0xab -hex value to which the bitmap has to be set.
+		-Depending on the values passed for cmd trace is enabled or diabled for a particular function.
+		-If all passed , all the operations are traced.
+	
+	
+USER PROGRAM treplay
+		
+		./treplay [-ns] TFILE
+		Absolute path of TFILE to be given.
+		
+		./treplay -n TFILE
+	    Details of the records to be replayed,
+		but does not replay the system call
+		
+		./treplay  TFILE
+		By default treplay displays the details of the records to be replayed,
+		but does not replay the system call
+		
+		./treplay -s TFILE
+		Displays the details of records to be replayed, replays but aborts when a devaition occurs.
+		Devaiation : Difference between the record in the logged file and the traced record.
+		
+		Records maintained as follows:
+			Record size, record id and record type are common for all the traced operations.
+			Other parameters maintained as needed by the operation to display the recorded arguments .
+			Passing these arguments system call made at the user level.
+			For open - pathname , mode and permissions were captured at the kernel level.
+			Thses arguments saved at the user level and open system call is called.
+			Devation is displayed according to the -n or -s option passed as argument for ./treplay
+			
+		Getting FD for read and write in treplay-
+		- record id of the open method is used as a key for this.
+		- When open system call is called in treplay , its record id and fd value are stored in a structure
+		- At trfs level when a write or read happens the corresponding open's record id is stored , this 
+		  value is retrieved at treplay and lookup structure is used to get fd of open.
+		  
+		
+		
+
+MOUNT WORKING
+	- mounted trfs on top of /usr/src/hw2-cse506g38/hw2/test, mountpoint is
+            /usr/src/hw2-cse506g38/hw2/upper/
+	- In mount command, provide Tfile path using option tfile as:
+	  "-o tfile=/temp/tfile.txt"
+	- Provide full path of tfile.txt file in tfile option, relative path
+          will not work.
+	- Added Mount Option by passing the tfile path to the trfs_read_super which 
+		constructs the superblock. 
+	- Validated the mount options before creating the tfile like checking whether option was given properly,
+	 whether the path was given properly.
+	- Then stored the tfile fd in super block's private data along with few other variables
+	- Also set the default values of the variables which were saved in superblock like record id counter, 
+		buffer for writing the records
+	
+			 
+	
+	
+REFERENCES
+		  
+	- For adding mount option to trfs, referenced code from fs/ecryptfs
+	
+	- Referenced http://lxr.free-electrons.com/source/ for functions like dentry_path_raw and many other things.
